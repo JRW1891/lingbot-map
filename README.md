@@ -74,6 +74,7 @@ LingBot-Map has focused on:
   - ✅ KITTI dataset
   - ⬜ VBR dataset
   - ⬜ Droid-W dataset
+  - ⬜ TUM-D dataset
   - ⬜ 7-scenes dataset
   - ⬜ ETH3D dataset
   - ⬜ Tanks and Temples dataset
