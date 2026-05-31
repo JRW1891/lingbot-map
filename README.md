@@ -326,6 +326,8 @@ python demo.py --model_path /path/to/checkpoint.pt \
 
 Use this pipeline when your sequence is too long for the interactive viser viewer — for example, the [indoor walkthrough featured above](#-featured-indoor-walkthrough-25-000-frames-13-minutes). `demo_render/batch_demo.py` is the all-in-one offline entry point: feed it a video or a folder of images and it will run model inference and produce a headless point-cloud flythrough MP4 in a single command. It shares the same PyTorch / FlashInfer / checkpoint stack as `demo.py`.
 
+For those constrained by limited VRAM or GPU usage, you may also refer to the implementation at: https://github.com/ureeey/lingbot-map-rtx4060-8g/commit/eeee84a89cc97c1e39b736b46df4ee315275700b
+
 ### Install (extends the main install)
 
 **1. Rendering Python dependencies**
