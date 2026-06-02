@@ -16,21 +16,24 @@ from benchmark.core.loader import BSSLoader
 
 
 # Mirrors lingbot-map/demo.py:413-421 — above this frame count, the KV cache
-# grows unbounded, so auto-bump the keyframe interval.
-_AUTO_KEYFRAME_THRESHOLD = 320
+# grows unbounded, so auto-bump the keyframe interval. Used as the default for
+# the configurable ``auto_keyframe_threshold`` constructor argument.
+_DEFAULT_AUTO_KEYFRAME_THRESHOLD = 320
 
 
-def _resolve_keyframe_interval(cfg_val, num_frames: int) -> int:
+def _resolve_keyframe_interval(
+    cfg_val, num_frames: int, threshold: int = _DEFAULT_AUTO_KEYFRAME_THRESHOLD
+) -> int:
     """Resolve a raw config value into a concrete keyframe interval.
 
     ``None``, ``0``, or the string ``"auto"`` triggers auto-selection:
-    ``1`` when ``num_frames <= 320`` else ``ceil(num_frames / 320)``.
+    ``1`` when ``num_frames <= threshold`` else ``ceil(num_frames / threshold)``.
     An explicit positive int is returned as-is.
     """
     if cfg_val is None or cfg_val == 0 or (isinstance(cfg_val, str) and cfg_val.lower() == "auto"):
-        if num_frames <= _AUTO_KEYFRAME_THRESHOLD:
+        if num_frames <= threshold:
             return 1
-        return (num_frames + _AUTO_KEYFRAME_THRESHOLD - 1) // _AUTO_KEYFRAME_THRESHOLD
+        return (num_frames + threshold - 1) // threshold
     return int(cfg_val)
 
 
@@ -59,6 +62,7 @@ class LingbotMapMethod(BaseMethod):
         window_size: int = 64,
         overlap_size: Optional[int] = None,
         keyframe_interval: Any = "auto",
+        auto_keyframe_threshold: int = _DEFAULT_AUTO_KEYFRAME_THRESHOLD,
         flow_threshold: float = 0.0,
         max_non_keyframe_gap: int = 30,
         align: int = 14,
@@ -87,11 +91,17 @@ class LingbotMapMethod(BaseMethod):
         self.window_size = window_size
         self.overlap_size = overlap_size
         self.keyframe_interval = keyframe_interval
+        self.auto_keyframe_threshold = int(auto_keyframe_threshold)
         self.flow_threshold = flow_threshold
         self.max_non_keyframe_gap = max_non_keyframe_gap
 
         if self.mode not in ('streaming', 'windowed'):
             raise ValueError(f"Invalid mode '{self.mode}'. Must be 'streaming' or 'windowed'")
+
+        if self.auto_keyframe_threshold <= 0:
+            raise ValueError(
+                f"auto_keyframe_threshold must be a positive int, got {self.auto_keyframe_threshold}"
+            )
 
         self._load_model()
 
@@ -148,11 +158,14 @@ class LingbotMapMethod(BaseMethod):
         num_frames = images.shape[0]
         with torch.no_grad(), torch.amp.autocast("cuda", dtype=dtype):
             if self.mode == 'streaming':
-                keyframe_interval = _resolve_keyframe_interval(self.keyframe_interval, num_frames)
+                keyframe_interval = _resolve_keyframe_interval(
+                    self.keyframe_interval, num_frames, self.auto_keyframe_threshold
+                )
                 if keyframe_interval != self.keyframe_interval:
                     print(
                         f"  → Auto-selected keyframe_interval={keyframe_interval} "
-                        f"(num_frames={num_frames}, raw={self.keyframe_interval!r})"
+                        f"(num_frames={num_frames}, raw={self.keyframe_interval!r}, "
+                        f"threshold={self.auto_keyframe_threshold})"
                     )
                 predictions = self.model.inference_streaming(
                     images,

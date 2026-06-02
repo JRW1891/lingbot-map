@@ -9,15 +9,16 @@
 ## 目录
 
 - [快速开始](#快速开始)
+- [已支持的数据集](#已支持的数据集)
+- [基准测试结果](#基准测试结果)
+- [评估指标](#评估指标)
+- [Viewer 系统](#viewer-系统)
 - [配置系统](#配置系统)
 - [BSS 存储系统](#bss-存储系统)
+- [环境配置](#环境配置)
+- [中断与恢复](#中断与恢复)
 - [添加新方法](#添加新方法)
 - [添加新数据集](#添加新数据集)
-- [评估指标](#评估指标)
-- [已支持的方法和数据集](#已支持的方法和数据集)
-- [环境配置](#环境配置)
-- [Viewer 系统](#viewer-系统)
-- [中断与恢复](#中断与恢复)
 
 ---
 
@@ -54,7 +55,7 @@ bash envs/install_lingbot_map.sh
 
 ```bash
 # 示例：Oxford Spires base config。其他开箱即用的数据集——
-# eth3d / kitti / nrgbd / oxford（+ oxford_long） / 7scenes / sintel / tnt / vbr / droid_w——
+# eth3d / kitti / neural_rgbd / oxford（+ oxford_long） / seven_scenes / tat / tum / vbr / droid_w（或 all）——
 # 流程一致，把 config 文件名换掉即可。
 python prepare.py  --config configs/oxford.yaml
 python run.py      --config configs/oxford.yaml
@@ -82,6 +83,212 @@ conda run -n lingbot_map python run_worker.py \
     --dataset oxford \
     --scene {scene_name}
 ```
+
+---
+
+## 已支持的数据集
+
+数据集适配器位于 `datasets/`，由 base config 通过 `datasets:` 字段引用。当前内置的适配器有：`eth3d`、`kitti`、`neural_rgbd`、`oxford_spires`、`seven_scenes`、`tnt`、`tum`、`vbr`、`droid_w`，另含一个 `general` 适配器，用于任意图像目录或视频文件（可选 COLMAP 集成自动估出内外参）。
+
+开箱即用的 base config：
+
+| Base config | 数据集适配器 | 启用的指标 |
+|-------------|------------|-----------|
+| `configs/eth3d.yaml` | `eth3d`（DA3 split） | traj + AUC + points |
+| `configs/seven_scenes.yaml` | `seven_scenes`（stride 5） | traj + AUC + points |
+| `configs/oxford.yaml` | `oxford_spires`（stride 12） | traj + AUC |
+| `configs/oxford_long.yaml` | `oxford_spires`（stride 1，长序列） | traj |
+| `configs/kitti.yaml` | `kitti`（504×280） | traj |
+| `configs/vbr.yaml` | `vbr`（cover-fit 504×280） | traj |
+| `configs/droid_w.yaml` | `droid_w`（宽度 518） | traj |
+| `configs/tum.yaml` | `tum`（Freiburg，宽度 518） | traj |
+| `configs/tat.yaml` | `tnt`（Tanks and Temples） | traj + AUC |
+| `configs/neural_rgbd.yaml` | `neural_rgbd` | points |
+| `configs/all.yaml` | 以上全部 | traj |
+
+具体的数据集参数（raw data root、采样 stride、depth clip 等）在 `configs/datasets/<name>.yaml` 中配置。
+
+### 数据准备
+
+各数据集原始数据的获取与准备方式如下（各数据集期望的 `raw_data_root` 结构见对应的 `configs/datasets/<name>.yaml`）：
+
+- **Oxford Spires** —— 数据准备请参考 `preprocess/oxford.py`。
+- **ETH3D**、**7-Scenes**、**Neural RGB-D** —— 数据准备请参考 [Pi3](https://github.com/yyfz/Pi3)。
+- **DROID-W** —— 从 [MoyangLi00/DROID-W](https://github.com/MoyangLi00/DROID-W) 下载。
+- **VBR** —— 按 [Junyi42/LoGeR](https://github.com/Junyi42/LoGeR) 的预处理流程得到对齐后的数据。
+- **TUM RGB-D** —— 从 [TUM RGB-D benchmark](https://cvg.cit.tum.de/data/datasets/rgbd-dataset/download) 下载序列。
+- **KITTI** —— 从 [KITTI odometry benchmark](https://www.cvlibs.net/datasets/kitti/eval_odometry.php) 下载里程计序列。
+
+### VBR 与 DROID-W
+
+两个仅评估轨迹的数据集，作为开箱即用示例内置。均按标准三段式命令运行：
+
+```bash
+# VBR（Vision Benchmark in Rome）——RGB + C2W TUM 轨迹 + 3x3 内参。
+python prepare.py  --config configs/vbr.yaml
+python run.py      --config configs/vbr.yaml
+python evaluate.py --config configs/vbr.yaml
+
+# DROID-W——RGB + C2W TUM 轨迹（按时间戳关联 GT）。
+python prepare.py  --config configs/droid_w.yaml
+python run.py      --config configs/droid_w.yaml
+python evaluate.py --config configs/droid_w.yaml
+```
+
+运行前，编辑数据集配置使其指向本地数据根目录：
+
+- `configs/datasets/vbr.yaml` —— `raw_data_root` 下应有 `{scene}_processed_aligned/` 目录（含 `rgb/`、`intrinsics.txt`）以及同级的 `processed_gt/{scene}_gt.txt`。`_target_size: [W, H]`（均为 14 的倍数）会对每帧做 cover-fit 缩放 + 中心裁剪，并同步更新内参。
+- `configs/datasets/droid_w.yaml` —— `raw_data_root` 下应有按场景划分的目录（如 `downtown1/`），每个含 `images_anonymized/`（以 Unix 时间戳命名的 JPEG）和 `traj_gt.txt` / `traj_gt_fastlivo.txt`。`_load_img_size` 设定目标宽度（高度等比缩放并向下取整到 14 的倍数）；GT 位姿按最近时间戳与帧关联。
+
+---
+
+## 基准测试结果
+
+以下结果由本流水线使用发布的 **`lingbot-map.pt`** 权重（streaming 模式）在随仓库提供的数据集配置上评测得到。每个数值为该数据集在全部评测场景上的聚合结果。
+
+> 箭头表示更优方向：ATE / RPE / accuracy / completeness / chamfer 为**越低越好**（↓）；AUC / precision / recall / F1 为**越高越好**（↑）。RPE-rot 单位为度。
+
+### 轨迹（ATE / RPE）
+
+| 数据集 | 场景数 | ATE ↓ | RPE-trans ↓ | RPE-rot (°) ↓ |
+|---|---:|---:|---:|---:|
+| ETH3D | 11 | 0.439 | 0.493 | 3.339 |
+| 7-Scenes | 18 | 0.079 | 0.020 | 0.579 |
+| TUM RGB-D | 9 | 0.045 | 0.013 | 0.513 |
+| Neural RGB-D | 9 | 0.056 | 0.019 | 0.257 |
+| Oxford Spires | 10 | 5.374 | 0.930 | 3.694 |
+| KITTI (504×280) | 11 | 24.046 | 2.861 | 0.696 |
+| VBR | 7 | 31.204 | 2.717 | 4.564 |
+| DROID-W | 7 | 0.909 | 0.184 | 6.115 |
+| Tanks and Temples | 6 | 0.210 | 0.087 | 0.572 |
+
+### 相机位姿 AUC
+
+成对相对位姿在不同角度阈值（度）下的 AUC。**macro** 对各场景 AUC 等权平均；**micro** 汇总所有场景的成对误差后统一计算。
+
+| 数据集 | 聚合方式 | AUC@3 ↑ | AUC@5 ↑ | AUC@15 ↑ | AUC@30 ↑ |
+|---|---|---:|---:|---:|---:|
+| ETH3D | macro | 37.22 | 50.83 | 72.99 | 81.10 |
+| ETH3D | micro | 40.34 | 56.15 | 79.82 | 87.97 |
+| 7-Scenes | macro | 12.35 | 23.23 | 60.01 | 78.09 |
+| 7-Scenes | micro | 13.20 | 24.61 | 61.45 | 79.06 |
+
+### 点云
+
+点云由预测深度反投影得到（该权重以 `enable_point=False` 运行），因此这些数值反映的是深度 / 几何质量。
+
+| 数据集 | Accuracy ↓ | Completeness ↓ | Chamfer ↓ | Precision ↑ | Recall ↑ | F1 ↑ |
+|---|---:|---:|---:|---:|---:|---:|
+| ETH3D | 0.168 | 0.089 | 0.128 | 82.33 | 92.51 | 86.80 |
+| 7-Scenes | 0.036 | 0.044 | 0.040 | 79.03 | 86.17 | 82.38 |
+| Neural RGB-D | 0.074 | 0.030 | 0.052 | 51.77 | 89.68 | 65.10 |
+
+### 轨迹可视化
+
+每个数据集各取一个代表性场景。每张图把 Sim(3) 对齐后的预测轨迹（**蓝色实线**，`est`）叠加在真值轨迹（**灰色虚线**，`ref`）上，分别给出 3D 视图与三个坐标平面投影（XY / XZ / YZ）。
+
+| ![Tanks and Temples](assets/traj/tat.png) | ![Oxford Spires](assets/traj/oxford.png) | ![KITTI](assets/traj/kitti.png) |
+|:---:|:---:|:---:|
+| Tanks and Temples — *Barn* | Oxford Spires — *observatory-quarter-01* | KITTI (504×280) — *seq 08* |
+| ![VBR](assets/traj/vbr.png) | ![DROID-W](assets/traj/droid_w.png) | ![TUM RGB-D](assets/traj/tum.png) |
+| VBR — *campus_train1* | DROID-W — *downtown3* | TUM RGB-D — *fr1/desk* |
+
+---
+
+## 评估指标
+
+### 轨迹评估
+
+若 `traj.txt` 存在则自动计算。
+
+| 指标 | 说明 |
+|------|------|
+| ATE | Sim(3) 对齐后的绝对轨迹误差 RMSE |
+| RPE Trans | 相对位姿误差（平移） |
+| RPE Rot | 相对位姿误差（旋转，度） |
+
+### AUC 评估
+
+若 `traj.txt` 存在则自动计算。
+
+| 指标 | 说明 |
+|------|------|
+| AUC@{3,5,15,30} | 不同角度阈值下的曲线下面积 |
+| Racc@{3,5,15,30} | 旋转精度（低于阈值的 pair 百分比） |
+| Tacc@{3,5,15,30} | 平移精度（低于阈值的 pair 百分比） |
+
+聚合模式（通过 `evaluation.auc.aggregation` 配置）：
+
+| 模式 | 说明 |
+|------|------|
+| `micro` | 池化所有 pair 后统一计算，帧数多的场景权重更大 |
+| `macro` | 按场景分别计算后取平均，各场景等权 |
+| `both` | 同时输出 `auc_micro.json` 和 `auc_macro.json` |
+
+### 深度评估
+
+可选，需要 GT 深度。
+
+| 指标 | 说明 |
+|------|------|
+| abs_rel | 绝对相对误差 |
+| sq_rel | 平方相对误差 |
+| rmse | 均方根误差 |
+| log_rmse | 对数均方根误差 |
+| delta_1_25 | 阈值精度（1.25） |
+| delta_1_25_2 | 阈值精度（1.25^2） |
+| delta_1_25_3 | 阈值精度（1.25^3） |
+
+### 点云评估
+
+可选，由数据集实现。
+
+| 指标 | 说明 |
+|------|------|
+| chamfer | Chamfer 距离（accuracy 与 completeness 均值） |
+| accuracy | 预测点到 GT 的平均距离 |
+| completeness | GT 到预测点的平均距离 |
+| precision_T | 预测点中距 GT 小于阈值 T 的百分比 |
+| recall_T | GT 中距预测点小于阈值 T 的百分比 |
+| f1_T | precision 与 recall 的调和平均 |
+
+---
+
+## Viewer 系统
+
+`viewer.py` 是基于 [viser](https://github.com/nerfstudio-project/viser) 的浏览器端交互式 3D 查看器，直接读取 BSS workspace，支持查看真值和各方法的输出。
+
+### 使用方法
+
+```bash
+# 查看工作空间中的所有数据
+python viewer.py /path/to/workspace
+
+# 自定义端口和采样参数
+python viewer.py /path/to/workspace -p 8080 -t 5 -s 4
+```
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `-p` / `--port` | 20540 | viser 服务端口 |
+| `-t` / `--temporal-subsample` | 1 | 每 N 帧加载一帧 |
+| `-s` / `--spatial-subsample` | 2 | 点云空间降采样倍数 |
+| `--verbose` | 关闭 | 详细日志输出 |
+
+### 功能
+
+- **数据选择**：下拉菜单切换 数据集 / 场景 / 方法（含 gt），即时加载
+- **逐帧点云**：深度图 + 轨迹反投影到世界坐标，支持置信度过滤
+- **全局点云**：显示 `points.ply`（若存在）
+- **相机视锥与轨迹**：可切换显示/隐藏，视锥大小可调
+- **回放控制**：时间轴滑块、播放/暂停、FPS 调节、循环播放、首帧/上一帧/下一帧/末帧导航
+- **历史帧**：独立滑块控制显示多少个历史相机视锥和历史点云帧
+- **天空去除**：可选天空分割以过滤天空像素（首次运行后缓存结果）
+- **点外观**：对数缩放点大小、运行时额外降采样
+- **自动对齐**：若 `traj_transform.txt` 存在（evaluate 阶段生成的 Sim(3) Umeyama 对齐矩阵），viewer 会自动将预测轨迹和点云变换到 GT 坐标系下显示。GUI 中会标注对齐状态（GT / 已对齐 / 未对齐）
+- **相机剪贴板**：复制当前相机视角（位置、朝向、上方向、FoV），在另一个浏览器客户端中粘贴恢复。适用于从完全相同的视角对比不同方法的重建结果
+- **场景缓存**：预处理点云缓存到磁盘，可从 GUI 清除缓存
+- **RGB 缩略图**：侧栏显示当前帧 RGB 图像
 
 ---
 
@@ -238,6 +445,50 @@ workspace/{dataset}/
 | 内参文件 | 每行 7 值（含注释头）：时间戳 fx fy cx cy width height |
 | 点云 | `.ply`，Nx3 或 Nx6（xyzrgb），RGB 在 [0,1] |
 | 深度/置信度存储 | `.exr`（OpenEXR） |
+
+---
+
+## 环境配置
+
+### 系统前提
+
+- CUDA 12.1（nvcc）/ Driver 支持 CUDA 13.0
+- Conda（推荐 miniforge/mamba）
+
+### 安装命令
+
+```bash
+# 框架 env（仅含 numpy/opencv/open3d/evo 等，无 PyTorch）。
+# prepare.py / evaluate.py / report.py / run.py 都在此 env 内运行。
+bash envs/install_bench.sh
+
+# lingbot_map 方法 env。脚本会检测已有的 `lingbot_map` env（由上游
+# lingbot-map 安装流程创建），并追加 bench 依赖。env 不存在时会从零构建。
+bash envs/install_lingbot_map.sh                # 交互式
+bash envs/install_lingbot_map.sh --append       # 非交互：追加 bench deps
+bash envs/install_lingbot_map.sh --force        # 非交互：从零重建
+
+# 自动发现 envs/ 下所有 install_*.sh 并依次执行（字母序）。
+bash envs/install_all.sh
+```
+
+所有安装脚本均幂等，重复执行不会出错。仓库默认只附带 `install_bench.sh` 和 `install_lingbot_map.sh`；用户接入新方法时，把 `envs/install_<name>.sh` 放到同目录，`install_all.sh` 会自动识别并执行。约定 conda env 名直接用方法名本身（如 `lingbot_map` 而非 `lingbot_map_env`），但方法配置中的 `env` 字段可以覆盖此约定。
+
+### `bench` env
+
+必装。承载 `prepare.py`、`evaluate.py`、`report.py` 和 `run.py`（dispatcher）。主要依赖：numpy、opencv、open3d、evo、matplotlib、pyyaml、tqdm，外加可视化用的 imageio、trimesh、plyfile、OpenEXR。
+
+---
+
+## 中断与恢复
+
+所有阶段（prepare、run、evaluate）通过 `.complete.json` 标记文件支持自动恢复，粒度为场景级：
+
+1. 流水线开始处理场景
+2. 中断执行（如 Ctrl+C）
+3. 重新运行相同命令，已完成的场景自动跳过
+
+使用 `--force` / `-f` 参数可忽略完成标记，强制重新处理。
 
 ---
 
@@ -416,193 +667,3 @@ def evaluate_pointcloud(gt_loader, pred_loader, logger, options=None):
     """自定义点云评估"""
     pass
 ```
-
----
-
-## 评估指标
-
-### 轨迹评估
-
-若 `traj.txt` 存在则自动计算。
-
-| 指标 | 说明 |
-|------|------|
-| ATE | Sim(3) 对齐后的绝对轨迹误差 RMSE |
-| RPE Trans | 相对位姿误差（平移） |
-| RPE Rot | 相对位姿误差（旋转，度） |
-
-### AUC 评估
-
-若 `traj.txt` 存在则自动计算。
-
-| 指标 | 说明 |
-|------|------|
-| AUC@{3,5,15,30} | 不同角度阈值下的曲线下面积 |
-| Racc@{3,5,15,30} | 旋转精度（低于阈值的 pair 百分比） |
-| Tacc@{3,5,15,30} | 平移精度（低于阈值的 pair 百分比） |
-
-聚合模式（通过 `evaluation.auc.aggregation` 配置）：
-
-| 模式 | 说明 |
-|------|------|
-| `micro` | 池化所有 pair 后统一计算，帧数多的场景权重更大 |
-| `macro` | 按场景分别计算后取平均，各场景等权 |
-| `both` | 同时输出 `auc_micro.json` 和 `auc_macro.json` |
-
-### 深度评估
-
-可选，需要 GT 深度。
-
-| 指标 | 说明 |
-|------|------|
-| abs_rel | 绝对相对误差 |
-| sq_rel | 平方相对误差 |
-| rmse | 均方根误差 |
-| log_rmse | 对数均方根误差 |
-| delta_1_25 | 阈值精度（1.25） |
-| delta_1_25_2 | 阈值精度（1.25^2） |
-| delta_1_25_3 | 阈值精度（1.25^3） |
-
-### 点云评估
-
-可选，由数据集实现。
-
-| 指标 | 说明 |
-|------|------|
-| chamfer | Chamfer 距离（accuracy 与 completeness 均值） |
-| accuracy | 预测点到 GT 的平均距离 |
-| completeness | GT 到预测点的平均距离 |
-| precision_T | 预测点中距 GT 小于阈值 T 的百分比 |
-| recall_T | GT 中距预测点小于阈值 T 的百分比 |
-| f1_T | precision 与 recall 的调和平均 |
-
----
-
-## 已支持的数据集
-
-数据集适配器位于 `datasets/`，由 base config 通过 `datasets:` 字段引用。当前内置的适配器有：`eth3d`、`kitti`、`neural_rgbd`、`oxford_spires`、`seven_scenes`、`sintel`、`tnt`、`vbr`、`droid_w`，另含一个 `general` 适配器，用于任意图像目录或视频文件（可选 COLMAP 集成自动估出内外参）。
-
-开箱即用的 base config：
-
-| Base config | 数据集适配器 | 启用的指标 |
-|-------------|------------|-----------|
-| `configs/7scenes.yaml` | `seven_scenes`（stride 5） | traj + AUC + points |
-| `configs/eth3d.yaml` | `eth3d`（DA3 split） | traj + AUC + points |
-| `configs/kitti.yaml` | `kitti`（full + 504x280） | traj |
-| `configs/nrgbd.yaml` | `neural_rgbd` | points |
-| `configs/oxford.yaml` | `oxford_spires`（stride 12） | traj + AUC |
-| `configs/oxford_long.yaml` | `oxford_spires`（stride 1，长序列） | traj |
-| `configs/sintel.yaml` | `sintel` | traj |
-| `configs/tnt.yaml` | `tnt` | traj + AUC |
-| `configs/vbr.yaml` | `vbr`（cover-fit 504x280） | traj |
-| `configs/droid_w.yaml` | `droid_w`（宽度 518） | traj |
-
-具体的数据集参数（raw data root、采样 stride、depth clip 等）在 `configs/datasets/<name>.yaml` 中配置。
-
-### VBR 与 DROID-W
-
-两个仅评估轨迹的数据集，作为开箱即用示例内置。均按标准三段式命令运行：
-
-```bash
-# VBR（Vision Benchmark in Rome）——RGB + C2W TUM 轨迹 + 3x3 内参。
-python prepare.py  --config configs/vbr.yaml
-python run.py      --config configs/vbr.yaml
-python evaluate.py --config configs/vbr.yaml
-
-# DROID-W——RGB + C2W TUM 轨迹（按时间戳关联 GT）。
-python prepare.py  --config configs/droid_w.yaml
-python run.py      --config configs/droid_w.yaml
-python evaluate.py --config configs/droid_w.yaml
-```
-
-数据来源：
-
-- **DROID-W**——从 [MoyangLi00/DROID-W](https://github.com/MoyangLi00/DROID-W) 下载。
-- **VBR**——按 [Junyi42/LoGeR](https://github.com/Junyi42/LoGeR) 的预处理流程得到对齐后的数据。
-
-运行前，编辑数据集配置使其指向本地数据根目录：
-
-- `configs/datasets/vbr.yaml` —— `raw_data_root` 下应有 `{scene}_processed_aligned/` 目录（含 `rgb/`、`intrinsics.txt`）以及同级的 `processed_gt/{scene}_gt.txt`。`_target_size: [W, H]`（均为 14 的倍数）会对每帧做 cover-fit 缩放 + 中心裁剪，并同步更新内参。
-- `configs/datasets/droid_w.yaml` —— `raw_data_root` 下应有按场景划分的目录（如 `downtown1/`），每个含 `images_anonymized/`（以 Unix 时间戳命名的 JPEG）和 `traj_gt.txt` / `traj_gt_fastlivo.txt`。`_load_img_size` 设定目标宽度（高度等比缩放并向下取整到 14 的倍数）；GT 位姿按最近时间戳与帧关联。
-
----
-
-## 环境配置
-
-### 系统前提
-
-- CUDA 12.1（nvcc）/ Driver 支持 CUDA 13.0
-- Conda（推荐 miniforge/mamba）
-
-### 安装命令
-
-```bash
-# 框架 env（仅含 numpy/opencv/open3d/evo 等，无 PyTorch）。
-# prepare.py / evaluate.py / report.py / run.py 都在此 env 内运行。
-bash envs/install_bench.sh
-
-# lingbot_map 方法 env。脚本会检测已有的 `lingbot_map` env（由上游
-# lingbot-map 安装流程创建），并追加 bench 依赖。env 不存在时会从零构建。
-bash envs/install_lingbot_map.sh                # 交互式
-bash envs/install_lingbot_map.sh --append       # 非交互：追加 bench deps
-bash envs/install_lingbot_map.sh --force        # 非交互：从零重建
-
-# 自动发现 envs/ 下所有 install_*.sh 并依次执行（字母序）。
-bash envs/install_all.sh
-```
-
-所有安装脚本均幂等，重复执行不会出错。仓库默认只附带 `install_bench.sh` 和 `install_lingbot_map.sh`；用户接入新方法时，把 `envs/install_<name>.sh` 放到同目录，`install_all.sh` 会自动识别并执行。约定 conda env 名直接用方法名本身（如 `lingbot_map` 而非 `lingbot_map_env`），但方法配置中的 `env` 字段可以覆盖此约定。
-
-### `bench` env
-
-必装。承载 `prepare.py`、`evaluate.py`、`report.py` 和 `run.py`（dispatcher）。主要依赖：numpy、opencv、open3d、evo、matplotlib、pyyaml、tqdm，外加可视化用的 imageio、trimesh、plyfile、OpenEXR。
-
----
-
-## Viewer 系统
-
-`viewer.py` 是基于 [viser](https://github.com/nerfstudio-project/viser) 的浏览器端交互式 3D 查看器，直接读取 BSS workspace，支持查看真值和各方法的输出。
-
-### 使用方法
-
-```bash
-# 查看工作空间中的所有数据
-python viewer.py /path/to/workspace
-
-# 自定义端口和采样参数
-python viewer.py /path/to/workspace -p 8080 -t 5 -s 4
-```
-
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `-p` / `--port` | 20540 | viser 服务端口 |
-| `-t` / `--temporal-subsample` | 1 | 每 N 帧加载一帧 |
-| `-s` / `--spatial-subsample` | 2 | 点云空间降采样倍数 |
-| `--verbose` | 关闭 | 详细日志输出 |
-
-### 功能
-
-- **数据选择**：下拉菜单切换 数据集 / 场景 / 方法（含 gt），即时加载
-- **逐帧点云**：深度图 + 轨迹反投影到世界坐标，支持置信度过滤
-- **全局点云**：显示 `points.ply`（若存在）
-- **相机视锥与轨迹**：可切换显示/隐藏，视锥大小可调
-- **回放控制**：时间轴滑块、播放/暂停、FPS 调节、循环播放、首帧/上一帧/下一帧/末帧导航
-- **历史帧**：独立滑块控制显示多少个历史相机视锥和历史点云帧
-- **天空去除**：可选天空分割以过滤天空像素（首次运行后缓存结果）
-- **点外观**：对数缩放点大小、运行时额外降采样
-- **自动对齐**：若 `traj_transform.txt` 存在（evaluate 阶段生成的 Sim(3) Umeyama 对齐矩阵），viewer 会自动将预测轨迹和点云变换到 GT 坐标系下显示。GUI 中会标注对齐状态（GT / 已对齐 / 未对齐）
-- **相机剪贴板**：复制当前相机视角（位置、朝向、上方向、FoV），在另一个浏览器客户端中粘贴恢复。适用于从完全相同的视角对比不同方法的重建结果
-- **场景缓存**：预处理点云缓存到磁盘，可从 GUI 清除缓存
-- **RGB 缩略图**：侧栏显示当前帧 RGB 图像
-
----
-
-## 中断与恢复
-
-所有阶段（prepare、run、evaluate）通过 `.complete.json` 标记文件支持自动恢复，粒度为场景级：
-
-1. 流水线开始处理场景
-2. 中断执行（如 Ctrl+C）
-3. 重新运行相同命令，已完成的场景自动跳过
-
-使用 `--force` / `-f` 参数可忽略完成标记，强制重新处理。

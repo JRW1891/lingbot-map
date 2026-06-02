@@ -1,13 +1,12 @@
-# 7Scenes — lingbot_map trajectory + AUC + point-cloud evaluation.
-# Stride-5 sampling; see configs/datasets/seven_scenes.yaml.
-workspace: /path/to/workspace/seven_scenes
+# ETH3D — lingbot_map trajectory + point-cloud evaluation.
+# DA3 (DepthAnything3) split; see configs/datasets/eth3d.yaml.
+workspace: /path/to/workspace/eth3d
 
 datasets:
-  - seven_scenes
+  - eth3d
 
 methods:
   - lingbot_map
-  - lingbot_map_v1
 
 evaluation:
   traj:
@@ -23,4 +22,3 @@ evaluation:
     enable: true
     vis: false
     icp_threshold: 0.1
-    conf_threshold: 0.0
